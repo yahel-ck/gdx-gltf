@@ -43,6 +43,9 @@ public class SceneManager implements Disposable {
 	private ModelBatch batch;
 	private ModelBatch depthBatch;
 	private SceneSkybox skyBox;
+	private TransmissionSource transmissionSource;
+	private MirrorSource mirrorSource;
+	private CascadeShadowMap cascadeShadowMap;
 	
 	/** Shouldn't be null. */
 	public Environment environment = new Environment();
@@ -102,6 +105,14 @@ public class SceneManager implements Disposable {
 		this.batch = batch;
 	}
 	
+	public void setDepthBatch (ModelBatch depthBatch) {
+		this.depthBatch = depthBatch;
+	}
+	
+	public ModelBatch getDepthBatch () {
+		return depthBatch;
+	}
+	
 	public void setShaderProvider(ShaderProvider shaderProvider) {
 		batch.dispose();
 		batch = new ModelBatch(shaderProvider, renderableSorter);
@@ -110,6 +121,41 @@ public class SceneManager implements Disposable {
 	public void setDepthShaderProvider(DepthShaderProvider depthShaderProvider) {
 		depthBatch.dispose();
 		depthBatch = new ModelBatch(depthShaderProvider);
+	}
+	
+	/**
+	 * Enable/disable opaque objects pre-rendering for transmission (refraction effect).
+	 * 
+	 * @param transmissionSource set null to disable pre-rendering.
+	 */
+	public void setTransmissionSource(TransmissionSource transmissionSource) {
+		if(this.transmissionSource != transmissionSource){
+			if(this.transmissionSource != null) this.transmissionSource.dispose();
+			this.transmissionSource = transmissionSource;
+		}
+	}
+	
+	/**
+	 * Enable/disable pre-rendering for mirror effect.
+	 * 
+	 * @param mirrorSource set null to disable mirror.
+	 */
+	public void setMirrorSource(MirrorSource mirrorSource) {
+		if(this.mirrorSource != mirrorSource){
+			if(this.mirrorSource != null) this.mirrorSource.dispose();
+			this.mirrorSource = mirrorSource;
+		}
+	}
+	
+	/**
+	 * Enable/disable pre-rendering for cascade shadow map.
+	 * @param cascadeShadowMap set null to disable.
+	 */
+	public void setCascadeShadowMap(CascadeShadowMap cascadeShadowMap) {
+		if(this.cascadeShadowMap != cascadeShadowMap){
+			if(this.cascadeShadowMap != null) this.cascadeShadowMap.dispose();
+			this.cascadeShadowMap = cascadeShadowMap;
+		}
 	}
 	
 	public void addScene(Scene scene){
@@ -208,20 +254,43 @@ public class SceneManager implements Disposable {
 	public void render(){
 		if(camera == null) return;
 		
+		PBRCommon.enableSeamlessCubemaps();
+		
 		renderShadows();
+		
+		renderMirror();
+		
+		renderTransmission();
 		
 		renderColors();
 	}
 	
+	public void renderMirror() {
+		if(mirrorSource != null){
+			mirrorSource.begin(camera, computedEnvironement, skyBox);
+			renderColors();
+			mirrorSource.end();
+		}
+	}
+
+	public void renderTransmission() {
+		if(transmissionSource != null){
+			transmissionSource.begin(camera);
+			transmissionSource.render(renderableProviders, environment);
+			if(skyBox != null) transmissionSource.render(skyBox);
+			transmissionSource.end();
+			computedEnvironement.set(transmissionSource.attribute);
+		}
+	}
+
 	/**
 	 * Render shadows only to interal frame buffers.
 	 * (useful when you're using your own frame buffer to render scenes)
 	 */
 	@SuppressWarnings("deprecation")
 	public void renderShadows(){
-		DirectionalLight light = getFirstDirectionalLight();
-		if(light instanceof DirectionalShadowLight){
-			DirectionalShadowLight shadowLight = (DirectionalShadowLight)light;
+		DirectionalShadowLight shadowLight = getFirstDirectionalShadowLight();
+		if(shadowLight != null){
 			shadowLight.begin();
 			renderDepth(shadowLight.getCamera());
 			shadowLight.end();
@@ -229,6 +298,16 @@ public class SceneManager implements Disposable {
 			environment.shadowMap = shadowLight;
 		}else{
 			environment.shadowMap = null;
+		}
+		computedEnvironement.shadowMap = environment.shadowMap;
+		
+		if(cascadeShadowMap != null){
+			for(DirectionalShadowLight light : cascadeShadowMap.lights){
+				light.begin();
+				renderDepth(light.getCamera());
+				light.end();
+			}
+			computedEnvironement.set(cascadeShadowMap.attribute);
 		}
 	}
 	
@@ -240,7 +319,11 @@ public class SceneManager implements Disposable {
 		renderDepth(camera);
 	}
 	
-	private void renderDepth(Camera camera){
+	/**
+	 * Render only depth (packed 32 bits) with custom camera.
+	 * Useful to render shadow maps.
+	 */
+	public void renderDepth(Camera camera){
 		depthBatch.begin(camera);
 		depthBatch.render(renderableProviders);
 		depthBatch.end();
@@ -251,8 +334,6 @@ public class SceneManager implements Disposable {
 	 * (useful when you're using your own frame buffer to render scenes)
 	 */
 	public void renderColors(){
-		PBRCommon.enableSeamlessCubemaps();
-		computedEnvironement.shadowMap = environment.shadowMap;
 		batch.begin(camera);
 		batch.render(renderableProviders, computedEnvironement);
 		if(skyBox != null) batch.render(skyBox);
@@ -265,6 +346,18 @@ public class SceneManager implements Disposable {
 			for(DirectionalLight dl : dla.lights){
 				if(dl instanceof DirectionalLight){
 					return (DirectionalLight)dl;
+				}
+			}
+		}
+		return null;
+	}
+
+	public DirectionalShadowLight getFirstDirectionalShadowLight(){
+		DirectionalLightsAttribute dla = environment.get(DirectionalLightsAttribute.class, DirectionalLightsAttribute.Type);
+		if(dla != null){
+			for(DirectionalLight dl : dla.lights){
+				if(dl instanceof DirectionalShadowLight){
+					return (DirectionalShadowLight)dl;
 				}
 			}
 		}
@@ -318,5 +411,8 @@ public class SceneManager implements Disposable {
 	public void dispose() {
 		batch.dispose();
 		depthBatch.dispose();
+		if(transmissionSource != null) transmissionSource.dispose();
+		if(mirrorSource != null) mirrorSource.dispose();
+		if(cascadeShadowMap != null) cascadeShadowMap.dispose();
 	}
 }

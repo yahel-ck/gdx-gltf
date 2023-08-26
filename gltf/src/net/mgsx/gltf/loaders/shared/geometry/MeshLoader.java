@@ -24,7 +24,6 @@ import net.mgsx.gltf.data.geometry.GLTFMesh;
 import net.mgsx.gltf.data.geometry.GLTFPrimitive;
 import net.mgsx.gltf.loaders.blender.BlenderShapeKeys;
 import net.mgsx.gltf.loaders.exceptions.GLTFIllegalException;
-import net.mgsx.gltf.loaders.exceptions.GLTFRuntimeException;
 import net.mgsx.gltf.loaders.exceptions.GLTFUnsupportedException;
 import net.mgsx.gltf.loaders.shared.GLTFTypes;
 import net.mgsx.gltf.loaders.shared.data.DataResolver;
@@ -140,9 +139,9 @@ public class MeshLoader {
 						if(accessor.componentType == GLTFTypes.C_FLOAT){
 							bonesWeights.set(unit, dataResolver.readBufferFloat(accessorId));
 						}else if(accessor.componentType == GLTFTypes.C_USHORT){ 
-							throw new GLTFUnsupportedException("unsigned short weight attribute not supported");
+							bonesWeights.set(unit, dataResolver.readBufferUShortAsFloat(accessorId));
 						}else if(accessor.componentType == GLTFTypes.C_UBYTE){ 
-							throw new GLTFUnsupportedException("unsigned byte weight attribute not supported");
+							bonesWeights.set(unit, dataResolver.readBufferUByteAsFloat(accessorId));
 						}else{
 							throw new GLTFIllegalException("illegal weight attribute type: " + accessor.componentType);
 						}
@@ -269,15 +268,6 @@ public class MeshLoader {
 					}
 					
 					GLTFBufferView glBufferView = dataResolver.getBufferView(glAccessor.bufferView);
-					
-					// not used for now : used for direct mesh ....
-					if(glBufferView.target != null){
-						if(glBufferView.target == 34963){ // ELEMENT_ARRAY_BUFFER
-						}else if(glBufferView.target == 34962){ // ARRAY_BUFFER
-						}else{
-							throw new GLTFRuntimeException("bufferView target unknown : " + glBufferView.target);
-						}
-					}
 					
 					FloatBuffer floatBuffer = dataResolver.getBufferFloat(glAccessor);
 					

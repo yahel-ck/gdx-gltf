@@ -27,9 +27,25 @@ public class DataResolver {
 
 	public float[] readBufferFloat(int accessorID) {
 		GLTFAccessor accessor = glModel.accessors.get(accessorID);
-		FloatBuffer floatBuffer = getBufferFloat(accessorID);
-		float [] data = new float[GLTFTypes.accessorSize(accessor) / 4];
-		floatBuffer.get(data);
+		GLTFBufferView bufferView = glModel.bufferViews.get(accessor.bufferView);
+		ByteBuffer bytes = dataFileResolver.getBuffer(bufferView.buffer);
+		bytes.position(bufferView.byteOffset + accessor.byteOffset);
+		float [] data = new float[GLTFTypes.accessorSize(accessor)/4];
+		
+		int nbFloatsPerVertex = GLTFTypes.accessorTypeSize(accessor);
+		int nbBytesToSkip = 0;
+		if(bufferView.byteStride != null) nbBytesToSkip = bufferView.byteStride - nbFloatsPerVertex * 4;
+		if(nbBytesToSkip == 0){
+			bytes.asFloatBuffer().get(data);
+		}else{
+			for(int i=0 ; i<accessor.count ; i++){
+				for(int j=0 ; j<nbFloatsPerVertex ; j++){
+					data[i*nbFloatsPerVertex+j] = bytes.getFloat();
+				}
+				// skip remaining bytes
+				bytes.position(bytes.position() + nbBytesToSkip);
+			}
+		}
 		return data;
 	}
 	
@@ -39,8 +55,22 @@ public class DataResolver {
 		ByteBuffer bytes = dataFileResolver.getBuffer(bufferView.buffer);
 		bytes.position(bufferView.byteOffset + accessor.byteOffset);
 		int [] data = new int[GLTFTypes.accessorSize(accessor)];
-		for(int i=0 ; i<data.length ; i++){
-			data[i] = bytes.get() & 0xFF;
+		
+		int nbBytesPerVertex = GLTFTypes.accessorTypeSize(accessor);
+		int nbBytesToSkip = 0;
+		if(bufferView.byteStride != null) nbBytesToSkip = bufferView.byteStride - nbBytesPerVertex;
+		if(nbBytesToSkip == 0){
+			for(int i=0 ; i<data.length ; i++){
+				data[i] = bytes.get() & 0xFF;
+			}
+		}else{
+			for(int i=0 ; i<accessor.count ; i++){
+				for(int j=0 ; j<nbBytesPerVertex ; j++){
+					data[i*nbBytesPerVertex+j] = bytes.get() & 0xFF;
+				}
+				// skip remaining bytes
+				bytes.position(bytes.position() + nbBytesToSkip);
+			}
 		}
 		return data;
 	}
@@ -50,12 +80,44 @@ public class DataResolver {
 		GLTFBufferView bufferView = glModel.bufferViews.get(accessor.bufferView);
 		ByteBuffer bytes = dataFileResolver.getBuffer(bufferView.buffer);
 		bytes.position(bufferView.byteOffset + accessor.byteOffset);
-		ShortBuffer shorts = bytes.asShortBuffer();
 		int [] data = new int[GLTFTypes.accessorSize(accessor)/2];
-		for(int i=0 ; i<data.length ; i++){
-			data[i] = shorts.get() & 0xFFFF;
+		
+		int nbShortsPerVertex = GLTFTypes.accessorTypeSize(accessor);
+		int nbBytesToSkip = 0;
+		if(bufferView.byteStride != null) nbBytesToSkip = bufferView.byteStride - nbShortsPerVertex * 2;
+		if(nbBytesToSkip == 0){
+			ShortBuffer shorts = bytes.asShortBuffer();
+			for(int i=0 ; i<data.length ; i++){
+				data[i] = shorts.get() & 0xFFFF;
+			}
+		}else{
+			for(int i=0 ; i<accessor.count ; i++){
+				for(int j=0 ; j<nbShortsPerVertex ; j++){
+					data[i*nbShortsPerVertex+j] = bytes.getShort() & 0xFFFF;
+				}
+				// skip remaining bytes
+				bytes.position(bytes.position() + nbBytesToSkip);
+			}
 		}
 		return data;
+	}
+	
+	public float[] readBufferUShortAsFloat(int accessorID) {
+		int[] intBuffer = readBufferUShort(accessorID);
+		float[] floatBuffer = new float[intBuffer.length];
+		for (int i = 0; i < intBuffer.length; i++) {
+			floatBuffer[i] = intBuffer[i] / 65535f;
+		}
+		return floatBuffer;
+	}
+
+	public float[] readBufferUByteAsFloat(int accessorID) {
+		int[] intBuffer = readBufferUByte(accessorID);
+		float[] floatBuffer = new float[intBuffer.length];
+		for (int i = 0; i < intBuffer.length; i++) {
+			floatBuffer[i] = intBuffer[i] / 255f;
+		}
+		return floatBuffer;
 	}
 
 	public FloatBuffer getBufferFloat(int accessorID) {

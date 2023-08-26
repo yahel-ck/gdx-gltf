@@ -1,7 +1,9 @@
 package net.mgsx.gltf.loaders.shared;
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Mesh;
+import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Model;
@@ -20,8 +22,14 @@ import net.mgsx.gltf.data.GLTF;
 import net.mgsx.gltf.data.camera.GLTFCamera;
 import net.mgsx.gltf.data.extensions.KHRLightsPunctual;
 import net.mgsx.gltf.data.extensions.KHRLightsPunctual.GLTFLight;
+import net.mgsx.gltf.data.extensions.KHRMaterialsEmissiveStrength;
+import net.mgsx.gltf.data.extensions.KHRMaterialsIOR;
+import net.mgsx.gltf.data.extensions.KHRMaterialsIridescence;
 import net.mgsx.gltf.data.extensions.KHRMaterialsPBRSpecularGlossiness;
+import net.mgsx.gltf.data.extensions.KHRMaterialsSpecular;
+import net.mgsx.gltf.data.extensions.KHRMaterialsTransmission;
 import net.mgsx.gltf.data.extensions.KHRMaterialsUnlit;
+import net.mgsx.gltf.data.extensions.KHRMaterialsVolume;
 import net.mgsx.gltf.data.extensions.KHRTextureTransform;
 import net.mgsx.gltf.data.scene.GLTFNode;
 import net.mgsx.gltf.data.scene.GLTFScene;
@@ -43,6 +51,22 @@ import net.mgsx.gltf.scene3d.scene.SceneModel;
 public class GLTFLoaderBase implements Disposable {
 
 	public static final String TAG = "GLTF";
+	
+	public final static ObjectSet<String> supportedExtensions = new ObjectSet<String>();;
+	static{
+		supportedExtensions.addAll(
+			KHRMaterialsPBRSpecularGlossiness.EXT,
+			KHRTextureTransform.EXT,
+			KHRLightsPunctual.EXT,
+			KHRMaterialsUnlit.EXT,
+			KHRMaterialsTransmission.EXT,
+			KHRMaterialsVolume.EXT,
+			KHRMaterialsIOR.EXT,
+			KHRMaterialsSpecular.EXT,
+			KHRMaterialsIridescence.EXT,
+			KHRMaterialsEmissiveStrength.EXT
+		);
+	}
 	
 	private static final ObjectSet<Material> materialSet = new ObjectSet<Material>();
 	private static final ObjectSet<MeshPart> meshPartSet = new ObjectSet<MeshPart>();
@@ -92,15 +116,19 @@ public class GLTFLoaderBase implements Disposable {
 			
 			glModel = dataFileResolver.getRoot();
 			
-			// prerequists
+			// prerequists (mandatory)
 			if(glModel.extensionsRequired != null){
 				for(String extension : glModel.extensionsRequired){
-					if(KHRMaterialsPBRSpecularGlossiness.EXT.equals(extension)){
-					}else if(KHRTextureTransform.EXT.equals(extension)){
-					}else if(KHRLightsPunctual.EXT.equals(extension)){
-					}else if(KHRMaterialsUnlit.EXT.equals(extension)){
-					}else{
+					if(!supportedExtensions.contains(extension)){
 						throw new GLTFUnsupportedException("Extension " + extension + " required but not supported");
+					}
+				}
+			}
+			// prerequists (optional)
+			if(glModel.extensionsUsed != null){
+				for(String extension : glModel.extensionsUsed){
+					if(!supportedExtensions.contains(extension)){
+						Gdx.app.error(TAG, "Extension " + extension + " used but not supported");
 					}
 				}
 			}
@@ -115,11 +143,9 @@ public class GLTFLoaderBase implements Disposable {
 				imageResolver.load(glModel.images);
 				textureResolver = new TextureResolver();
 				textureResolver.loadTextures(glModel.textures, glModel.samplers, imageResolver);
-				imageResolver.dispose();
 			}
 			
-			materialLoader = new PBRMaterialLoader(textureResolver);
-			// materialLoader = new DefaultMaterialLoader(textureResolver);
+			materialLoader = createMaterialLoader(textureResolver);
 			materialLoader.loadMaterials(glModel.materials);
 			
 			loadCameras();
@@ -136,6 +162,10 @@ public class GLTFLoaderBase implements Disposable {
 			model.scene = scenes.get(glModel.scene);
 			model.maxBones = skinLoader.getMaxBones();
 			model.textures = textureResolver.getTextures(new Array<Texture>());
+			if(imageResolver != null){
+				model.pixmaps = imageResolver.getPixmaps(new Array<Pixmap>());
+				imageResolver.clear();
+			}
 			model.animations = animationLoader.animations;
 			// XXX don't know where the animation are ...
 			for(SceneModel scene : model.scenes){
@@ -150,6 +180,10 @@ public class GLTFLoaderBase implements Disposable {
 			dispose();
 			throw e;
 		}
+	}
+	
+	protected MaterialLoader createMaterialLoader(TextureResolver textureResolver) {
+		return new PBRMaterialLoader(textureResolver);
 	}
 	
 	private void loadLights() {
@@ -262,7 +296,7 @@ public class GLTFLoaderBase implements Disposable {
 				Matrix4 matrix = new Matrix4(glNode.matrix);
 				matrix.getTranslation(node.translation);
 				matrix.getScale(node.scale);
-				matrix.getRotation(node.rotation);
+				matrix.getRotation(node.rotation, true);
 			}else{
 				if(glNode.translation != null){
 					GLTFTypes.map(node.translation, glNode.translation);

@@ -36,9 +36,13 @@ import net.mgsx.gltf.demo.events.IBLFolderChangeEvent;
 import net.mgsx.gltf.demo.events.ModelSelectedEvent;
 import net.mgsx.gltf.demo.model.IBLStudio;
 import net.mgsx.gltf.demo.model.IBLStudio.IBLPreset;
+import net.mgsx.gltf.scene3d.attributes.MirrorAttribute;
 import net.mgsx.gltf.scene3d.attributes.PBRColorAttribute;
 import net.mgsx.gltf.scene3d.attributes.PBRFloatAttribute;
+import net.mgsx.gltf.scene3d.attributes.PBRHDRColorAttribute;
+import net.mgsx.gltf.scene3d.attributes.PBRIridescenceAttribute;
 import net.mgsx.gltf.scene3d.attributes.PBRTextureAttribute;
+import net.mgsx.gltf.scene3d.attributes.PBRVolumeAttribute;
 import net.mgsx.gltf.scene3d.model.NodePartPlus;
 import net.mgsx.gltf.scene3d.model.NodePlus;
 import net.mgsx.gltf.scene3d.scene.SceneManager;
@@ -87,6 +91,7 @@ public class GLTFDemoUI extends Table {
 	public SelectBox<SRGB> skyboxSRGB;
 	public BooleanUI skyboxGammaCorrection;
 	public FloatUI envRotation;
+	public BooleanUI transmissionPassEnabled;
 	public Vector4UI fogColor;
 	public Vector3UI fogEquation;
 
@@ -131,6 +136,20 @@ public class GLTFDemoUI extends Table {
 	public final Slider uiScaleSlider;
 
 	public final Slider emissiveSlider;
+
+	public final SelectBox<SRGB> transmissionSRGB;
+
+	public BooleanUI mirror;
+
+	public Vector3UI mirrorNormal;
+
+	public FloatUI mirrorOrigin;
+
+	public BooleanUI mirrorClip;
+
+	public SelectBox<SRGB> mirrorSRGB;
+
+	public BooleanUI shadowCascade;
 
 	public GLTFDemoUI(SceneManager sceneManager, Skin skin, final FileHandle rootFolder) {
 		super(skin);
@@ -268,8 +287,30 @@ public class GLTFDemoUI extends Table {
 		shaderOptions.optTable.add(skyboxGammaCorrection = new BooleanUI(skin, false)).row();
 		
 		shaderOptions.optTable.add("Rotation");
-		shaderOptions.optTable.add(envRotation = new FloatUI(skin, 0)).row();
+		shaderOptions.optTable.add(envRotation = new FloatUI(skin, 0.5f)).row();
+	
+		shaderOptions.optTable.add("Transmission Pass");
+		shaderOptions.optTable.add(transmissionPassEnabled = new BooleanUI(skin, true)).row();
 
+		shaderOptions.optTable.add("Transmission SRGB");
+		shaderOptions.optTable.add(transmissionSRGB = new SelectBox<SRGB>(skin)).row();
+		transmissionSRGB.setItems(SRGB.values());
+		transmissionSRGB.setSelected(SRGB.ACCURATE);
+
+		// Mirror
+		shaderOptions.optTable.add("Mirror");
+		shaderOptions.optTable.add(mirror = new BooleanUI(skin, false)).row();
+		shaderOptions.optTable.add("Mirror normal");
+		shaderOptions.optTable.add(mirrorNormal = new Vector3UI(skin, new Vector3(0,1,0))).row();
+		shaderOptions.optTable.add("Mirror origin");
+		shaderOptions.optTable.add(mirrorOrigin = new FloatUI(skin, 0, null, -10, 10)).row();
+		shaderOptions.optTable.add("Mirror clip");
+		shaderOptions.optTable.add(mirrorClip = new BooleanUI(skin, true)).row();
+		shaderOptions.optTable.add("Mirror SRGB");
+		shaderOptions.optTable.add(mirrorSRGB = new SelectBox<SRGB>(skin)).row();
+		mirrorSRGB.setItems(SRGB.values());
+		mirrorSRGB.setSelected(SRGB.ACCURATE);
+		
 		// Outlines
 		root.add();
 		root.add(outlineOptions = new CollapsableUI(skin, "Outline Options", false)).row();
@@ -316,6 +357,9 @@ public class GLTFDemoUI extends Table {
 		
 		lightOptions.optTable.add("Shadow Bias");
 		lightOptions.optTable.add(shadowBias = new FloatUI(skin, 0)).row();
+		
+		lightOptions.optTable.add("Cascade Shadow Map");
+		lightOptions.optTable.add(shadowCascade = new BooleanUI(skin, false)).row();
 		
 		ambiantSlider = new Slider(0, 1, .01f, false, skin);
 		ambiantSlider.setValue(1f);
@@ -535,6 +579,60 @@ public class GLTFDemoUI extends Table {
 		// occlusion
 		materialTable.add(new FloatAttributeUI(getSkin(), material.get(PBRFloatAttribute.class, PBRFloatAttribute.OcclusionStrength))).row();
 		addMaterialTextureSwitch("Occlusion Texture", material, PBRTextureAttribute.OcclusionTexture);
+		
+		// transmission
+		materialTable.add(new FloatAttributeUI(getSkin(), material.get(PBRFloatAttribute.class, PBRFloatAttribute.TransmissionFactor))).row();
+		addMaterialTextureSwitch("Transmission Texture", material, PBRTextureAttribute.TransmissionTexture);
+		
+		// volume
+		final PBRVolumeAttribute volume = material.get(PBRVolumeAttribute.class, PBRVolumeAttribute.Type);
+		if(volume != null){
+			materialTable.add(new FloatUI(getSkin(), volume.thicknessFactor, "Thickness", 0, 10){
+				@Override
+				protected void onChange(float value) {
+					volume.thicknessFactor = value;
+				}
+			}).row();
+		}
+		addMaterialTextureSwitch("Thickness Texture", material, PBRTextureAttribute.ThicknessTexture);
+		
+		materialTable.add(new FloatAttributeUI(getSkin(), material.get(PBRFloatAttribute.class, PBRFloatAttribute.IOR), 1f, 3f)).row();
+
+		// Specular
+		materialTable.add(new FloatAttributeUI(getSkin(), material.get(PBRFloatAttribute.class, PBRFloatAttribute.SpecularFactor), 0, 1)).row();
+		addMaterialTextureSwitch("Specular Factor Texture", material, PBRTextureAttribute.SpecularFactorTexture);
+		materialTable.add(new HDRColorAttributeUI(getSkin(), material.get(PBRHDRColorAttribute.class, PBRHDRColorAttribute.Specular), 100f)).row();
+		addMaterialTextureSwitch("Specular Color Texture", material, PBRTextureAttribute.Specular);
+		
+		// Iridescence
+		final PBRIridescenceAttribute iridescence = material.get(PBRIridescenceAttribute.class, PBRIridescenceAttribute.Type);
+		if(iridescence != null){
+			materialTable.add(new FloatUI(getSkin(), iridescence.factor, "Iridescence"){
+				@Override
+				protected void onChange(float value) {
+					iridescence.factor = value;
+				}
+			}).row();
+		}
+		
+		// Mirror
+		final BooleanUI mirrorSwitch = new BooleanUI(getSkin(), material.has(MirrorAttribute.Specular));
+		{
+			Table t = new Table(getSkin());
+			t.add("Mirror");
+			t.add(mirrorSwitch);
+			materialTable.add(t).row();
+			mirrorSwitch.addListener(new ChangeListener() {
+				@Override
+				public void changed(ChangeEvent event, Actor actor) {
+					if(mirrorSwitch.isOn()){
+						material.set(MirrorAttribute.createSpecular());
+					}else{
+						material.remove(MirrorAttribute.Specular);
+					}
+				}
+			});
+		}
 	}
 	
 	private void addMaterialTextureSwitch(String name, final Material material, long type){

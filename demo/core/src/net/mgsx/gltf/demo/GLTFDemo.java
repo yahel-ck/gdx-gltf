@@ -59,17 +59,21 @@ import net.mgsx.gltf.loaders.glb.GLBAssetLoader;
 import net.mgsx.gltf.loaders.glb.GLBLoader;
 import net.mgsx.gltf.loaders.gltf.GLTFAssetLoader;
 import net.mgsx.gltf.loaders.gltf.GLTFLoader;
+import net.mgsx.gltf.loaders.shared.SceneAssetLoaderParameters;
 import net.mgsx.gltf.scene3d.attributes.FogAttribute;
 import net.mgsx.gltf.scene3d.attributes.PBRCubemapAttribute;
 import net.mgsx.gltf.scene3d.attributes.PBRFloatAttribute;
 import net.mgsx.gltf.scene3d.attributes.PBRTextureAttribute;
 import net.mgsx.gltf.scene3d.lights.DirectionalLightEx;
 import net.mgsx.gltf.scene3d.lights.DirectionalShadowLight;
+import net.mgsx.gltf.scene3d.scene.CascadeShadowMap;
+import net.mgsx.gltf.scene3d.scene.MirrorSource;
 import net.mgsx.gltf.scene3d.scene.Scene;
 import net.mgsx.gltf.scene3d.scene.SceneAsset;
 import net.mgsx.gltf.scene3d.scene.SceneManager;
 import net.mgsx.gltf.scene3d.scene.SceneModel;
 import net.mgsx.gltf.scene3d.scene.SceneSkybox;
+import net.mgsx.gltf.scene3d.scene.TransmissionSource;
 import net.mgsx.gltf.scene3d.shaders.PBRShaderConfig;
 import net.mgsx.gltf.scene3d.shaders.PBRShaderProvider;
 import net.mgsx.gltf.scene3d.utils.EnvironmentUtil;
@@ -90,6 +94,8 @@ public class GLTFDemo extends ApplicationAdapter
 	public static int defaultUIScale = 1;
 	
 	private static final String TAG = "GLTFDemo";
+
+	private static final int SHADOW_MAP_SIZE = 2048;
 	
 	public static enum ShaderMode{
 		GOURAUD,	// https://en.wikipedia.org/wiki/Gouraud_shading#Comparison_with_other_shading_techniques
@@ -139,6 +145,9 @@ public class GLTFDemo extends ApplicationAdapter
 	private ShaderProgram outlineShader;
 
 	private ScreenViewport viewport;
+	
+	private MirrorSource mirror;
+	private CascadeShadowMap csm;
 	
 	public GLTFDemo() {
 		this(null);
@@ -195,13 +204,13 @@ public class GLTFDemo extends ApplicationAdapter
 					"textures/" + alternateMaps + "/specular/specular_", "_", ".jpg", 10, EnvironmentUtil.FACE_NAMES_NEG_POS);
 		}else{
 			diffuseCubemap = EnvironmentUtil.createCubemap(new InternalFileHandleResolver(), 
-					"textures/diffuse/diffuse_", "_0.jpg", EnvironmentUtil.FACE_NAMES_NEG_POS);
+					"textures/diffuse/diffuse_", ".png", EnvironmentUtil.FACE_NAMES_NEG_POS);
 			
 			environmentCubemap = EnvironmentUtil.createCubemap(new InternalFileHandleResolver(), 
-					"textures/environment/environment_", "_0.png", EnvironmentUtil.FACE_NAMES_NEG_POS);
+					"textures/environment/environment_", ".png", EnvironmentUtil.FACE_NAMES_NEG_POS);
 			
 			specularCubemap = EnvironmentUtil.createCubemap(new InternalFileHandleResolver(), 
-					"textures/specular/specular_", "_", ".jpg", 10, EnvironmentUtil.FACE_NAMES_NEG_POS);
+					"textures/specular/specular_", "_", ".png", 10, EnvironmentUtil.FACE_NAMES_NEG_POS);
 		}
 	}
 	
@@ -240,6 +249,9 @@ public class GLTFDemo extends ApplicationAdapter
 		sceneManager.environment.set(new PBRFloatAttribute(PBRFloatAttribute.ShadowBias, 0f));
 		
 		sceneManager.setAmbientLight(1f);
+		
+		sceneManager.setEnvironmentRotation(180);
+		
 		if(ui != null) ui.ambiantSlider.setValue(1f);
 	}
 	
@@ -437,6 +449,56 @@ public class GLTFDemo extends ApplicationAdapter
 				sceneManager.setEnvironmentRotation(ui.envRotation.getValue() * 360);
 			}
 		});
+		ui.transmissionPassEnabled.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				invalidateShaders();
+			}
+		});
+		ui.transmissionSRGB.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				invalidateShaders();
+			}
+		});
+		
+		ui.mirror.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				if(ui.mirror.isOn()){
+					mirror = new MirrorSource();
+					updateMirror();
+					sceneManager.setMirrorSource(mirror);
+				}else{
+					sceneManager.setMirrorSource(null);
+					mirror = null;
+				}
+			}
+		});
+		ui.mirrorClip.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				updateMirror();
+			}
+		});
+		ui.mirrorNormal.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				updateMirror();
+			}
+		});
+		ui.mirrorOrigin.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				updateMirror();
+			}
+		});
+		ui.mirrorSRGB.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				invalidateShaders();
+			}
+		});
 		
 		ui.sceneSelector.addListener(new ChangeListener() {
 			@Override
@@ -449,6 +511,17 @@ public class GLTFDemo extends ApplicationAdapter
 			@Override
 			public void changed(ChangeEvent event, Actor actor) {
 				setShadow(ui.lightShadow.isOn());
+			}
+		});
+		ui.shadowCascade.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				if(ui.shadowCascade.isOn()){
+					sceneManager.setCascadeShadowMap(csm = new CascadeShadowMap(3));
+				}else{
+					sceneManager.setCascadeShadowMap(csm = null);
+				}
+				invalidateShaders();
 			}
 		});
 		
@@ -548,6 +621,13 @@ public class GLTFDemo extends ApplicationAdapter
 		});
 	}
 	
+	private void updateMirror(){
+		if(mirror != null){
+			Vector3 n = ui.mirrorNormal.value;
+			mirror.set(n.x,n.y,n.z, ui.mirrorOrigin.getValue(), ui.mirrorClip.isOn());
+		}
+	}
+	
 	private void save(FileHandle file) {
 		if(scene != null){
 			new GLTFExporter().export(scene, file);
@@ -560,7 +640,7 @@ public class GLTFDemo extends ApplicationAdapter
 			// change first direction light to shadow light (1 only supported for now)
 			DirectionalLight oldLight = sceneManager.getFirstDirectionalLight();
 			if(oldLight != null && !(oldLight instanceof DirectionalShadowLight)){
-				DirectionalLight newLight = new DirectionalShadowLight().setBounds(sceneBox).set(oldLight);
+				DirectionalLight newLight = new DirectionalShadowLight(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE).setBounds(sceneBox).set(oldLight);
 				sceneManager.environment.remove(oldLight);
 				sceneManager.environment.add(newLight);
 				if(oldLight == defaultLight){
@@ -617,9 +697,10 @@ public class GLTFDemo extends ApplicationAdapter
 		if(rootModel != null){
 			if(!shadersValid){
 				shadersValid = true;
-				sceneManager.setShaderProvider(createShaderProvider(shaderMode, rootModel.maxBones));
+				ShaderProvider colorShader = createShaderProvider(shaderMode, rootModel.maxBones);
+				sceneManager.setShaderProvider(colorShader);
 				sceneManager.setDepthShaderProvider(PBRShaderProvider.createDefaultDepth(rootModel.maxBones));
-				
+				sceneManager.setTransmissionSource(ui.transmissionPassEnabled.isOn() ? new TransmissionSource(colorShader) : null);
 			}
 		}
 		if(!outlineShaderValid){
@@ -674,6 +755,8 @@ public class GLTFDemo extends ApplicationAdapter
 				PBRShaderConfig config = PBRShaderProvider.createDefaultConfig();
 				config.manualSRGB = ui.shaderSRGB.getSelected();
 				config.manualGammaCorrection = ui.shaderGammaCorrection.isOn();
+				config.transmissionSRGB = ui.transmissionSRGB.getSelected();
+				config.mirrorSRGB = ui.mirrorSRGB.getSelected();
 				config.numBones = maxBones;
 				config.numDirectionalLights = info.dirLights;
 				config.numPointLights = info.pointLights;
@@ -718,14 +801,14 @@ public class GLTFDemo extends ApplicationAdapter
 		
 		clearScene();		
 		if(rootModel != null){
-			rootModel.dispose();
-			rootModel = null;
-			if(lastFileName != null){
-				if(USE_ASSET_MANAGER){
+			if(USE_ASSET_MANAGER){
+				if(lastFileName != null){
 					assetManager.unload(lastFileName);
 				}
-				lastFileName = null;
+			}else{
+				rootModel.dispose();
 			}
+			rootModel = null;
 		}
 		
 		Gdx.app.log(TAG, "loading " + glFile.name());
@@ -733,14 +816,16 @@ public class GLTFDemo extends ApplicationAdapter
 		lastFileName = glFile.path();
 		
 		if(USE_ASSET_MANAGER){
-			assetManager.load(lastFileName, SceneAsset.class);
+			SceneAssetLoaderParameters params = new SceneAssetLoaderParameters();
+			params.withData = true;
+			assetManager.load(lastFileName, SceneAsset.class, params);
 			assetManager.finishLoading();
 			rootModel = assetManager.get(lastFileName, SceneAsset.class);
 		}else{
 			if(glFile.extension().equalsIgnoreCase("glb")){
-				rootModel = new GLBLoader().load(glFile);
+				rootModel = new GLBLoader().load(glFile, true);
 			}else if(glFile.extension().equalsIgnoreCase("gltf")){
-				rootModel = new GLTFLoader().load(glFile);
+				rootModel = new GLTFLoader().load(glFile, true);
 			}
 		}
 		
@@ -796,9 +881,9 @@ public class GLTFDemo extends ApplicationAdapter
 		
 		setShadow(ui.lightShadow.isOn());
 		
-		DirectionalLight light = sceneManager.getFirstDirectionalLight();
-		if(light instanceof DirectionalShadowLight){
-			((DirectionalShadowLight)light).setBounds(sceneBox);
+		DirectionalShadowLight light = sceneManager.getFirstDirectionalShadowLight();
+		if(light != null){
+			light.setBounds(sceneBox);
 		}
 		
 		invalidateShaders();
@@ -806,7 +891,7 @@ public class GLTFDemo extends ApplicationAdapter
 	
 	private void resetDefaultLight() {
 		// light direction based on environnement map SUN
-		defaultLight.direction.set(-.5f,-.5f,-.7f).nor();
+		defaultLight.direction.set(.5f,-.5f,-.7f).nor();
 		defaultLight.color.set(Color.WHITE);
 		if(defaultLight instanceof DirectionalLightEx){
 			DirectionalLightEx light = (DirectionalLightEx)defaultLight;
@@ -831,7 +916,7 @@ public class GLTFDemo extends ApplicationAdapter
 			
 			float size = Math.max(bb.getWidth(), Math.max(bb.getHeight(), bb.getDepth()));
 			camera.near = size / 1000f;
-			camera.far = size * 30f;
+			camera.far = size * 10f;
 			
 			camera.update(true);
 			
@@ -881,11 +966,22 @@ public class GLTFDemo extends ApplicationAdapter
 			emissive.value = ui.emissiveSlider.getValue();
 		}
 		
-		sceneManager.update(delta);
-		
 		if(cameraControl != null){
 			cameraControl.update();
 		}
+		
+		DirectionalShadowLight shadowLight = sceneManager.getFirstDirectionalShadowLight();
+		if(shadowLight != null){
+			if(csm != null){
+				float depth = Math.max(sceneBox.getWidth(), Math.max(sceneBox.getHeight(), sceneBox.getDepth()));
+				csm.setCascades(cameraControl.camera, shadowLight, depth, 4f);
+			}else{
+				shadowLight.setBounds(sceneBox);
+			}
+		}
+		
+		sceneManager.update(delta);
+		
 		
 		Gdx.gl.glClearColor(ui.fogColor.value.r, ui.fogColor.value.g, ui.fogColor.value.b, 0f);
 		Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);

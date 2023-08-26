@@ -11,6 +11,20 @@ public class PBRShaderConfig extends DefaultShader.Config
 	 * or automatically converted by OpenGL when using {@link com.badlogic.gdx.graphics.GL30#GL_SRGB} format.
 	 */
 	public SRGB manualSRGB = SRGB.ACCURATE;
+	
+	/**
+	 * Enable conversion of SRGB space frame buffer into linear space in shader for transmission source.
+	 * Should be {@link SRGB#NONE} if the transmission frame buffer is already in linear space.
+	 * By default, transmission source is considered rendered with gamma correction (sRGB space).
+	 */
+	public SRGB transmissionSRGB = SRGB.ACCURATE;
+
+	/**
+	 * Enable conversion of SRGB space frame buffer into linear space in shader for mirror source.
+	 * Should be {@link SRGB#NONE} if the mirror frame buffer is already in linear space.
+	 * By default, mirror source is considered rendered with gamma correction (sRGB space).
+	 */
+	public SRGB mirrorSRGB = SRGB.ACCURATE;
 
 	/**
 	 * Enable/Disable gamma correction.

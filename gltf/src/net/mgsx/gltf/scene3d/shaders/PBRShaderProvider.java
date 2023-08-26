@@ -18,16 +18,25 @@ import com.badlogic.gdx.graphics.g3d.utils.DepthShaderProvider;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.utils.GdxRuntimeException;
 
+import net.mgsx.gltf.scene3d.attributes.CascadeShadowMapAttribute;
+import net.mgsx.gltf.scene3d.attributes.ClippingPlaneAttribute;
 import net.mgsx.gltf.scene3d.attributes.FogAttribute;
+import net.mgsx.gltf.scene3d.attributes.MirrorAttribute;
+import net.mgsx.gltf.scene3d.attributes.MirrorSourceAttribute;
 import net.mgsx.gltf.scene3d.attributes.PBRColorAttribute;
 import net.mgsx.gltf.scene3d.attributes.PBRCubemapAttribute;
 import net.mgsx.gltf.scene3d.attributes.PBRFlagAttribute;
+import net.mgsx.gltf.scene3d.attributes.PBRFloatAttribute;
+import net.mgsx.gltf.scene3d.attributes.PBRHDRColorAttribute;
+import net.mgsx.gltf.scene3d.attributes.PBRIridescenceAttribute;
 import net.mgsx.gltf.scene3d.attributes.PBRMatrixAttribute;
 import net.mgsx.gltf.scene3d.attributes.PBRTextureAttribute;
 import net.mgsx.gltf.scene3d.attributes.PBRVertexAttributes;
+import net.mgsx.gltf.scene3d.attributes.PBRVolumeAttribute;
 import net.mgsx.gltf.scene3d.shaders.PBRShaderConfig.SRGB;
 import net.mgsx.gltf.scene3d.utils.LightUtils;
 import net.mgsx.gltf.scene3d.utils.LightUtils.LightsInfo;
+import net.mgsx.gltf.scene3d.utils.ShaderParser;
 
 public class PBRShaderProvider extends DefaultShaderProvider
 {
@@ -39,7 +48,7 @@ public class PBRShaderProvider extends DefaultShaderProvider
 
 	public static String getDefaultVertexShader () {
 		if (defaultVertexShader == null)
-			defaultVertexShader = Gdx.files.classpath("net/mgsx/gltf/shaders/gdx-pbr.vs.glsl").readString();
+			defaultVertexShader = ShaderParser.parse(Gdx.files.classpath("net/mgsx/gltf/shaders/pbr/pbr.vs.glsl"));
 		return defaultVertexShader;
 	}
 
@@ -47,7 +56,7 @@ public class PBRShaderProvider extends DefaultShaderProvider
 
 	public static String getDefaultFragmentShader () {
 		if (defaultFragmentShader == null)
-			defaultFragmentShader = Gdx.files.classpath("net/mgsx/gltf/shaders/gdx-pbr.fs.glsl").readString();
+			defaultFragmentShader = ShaderParser.parse(Gdx.files.classpath("net/mgsx/gltf/shaders/pbr/pbr.fs.glsl"));
 		return defaultFragmentShader;
 	}
 
@@ -157,6 +166,18 @@ public class PBRShaderProvider extends DefaultShaderProvider
 		if(config.manualGammaCorrection){
 			prefix += "#define GAMMA_CORRECTION " + config.gamma + "\n";
 		}
+		if(config.transmissionSRGB != SRGB.NONE){
+			prefix += "#define TS_MANUAL_SRGB\n";
+			if(config.transmissionSRGB == SRGB.FAST){
+				prefix += "#define TS_SRGB_FAST_APPROXIMATION\n";
+			}
+		}
+		if(config.mirrorSRGB != SRGB.NONE){
+			prefix += "#define MS_MANUAL_SRGB\n";
+			if(config.mirrorSRGB == SRGB.FAST){
+				prefix += "#define MS_SRGB_FAST_APPROXIMATION\n";
+			}
+		}
 		return prefix;
 	}
 	
@@ -191,10 +212,69 @@ public class PBRShaderProvider extends DefaultShaderProvider
 			if(renderable.material.has(PBRTextureAttribute.OcclusionTexture)){
 				prefix += "#define occlusionTextureFlag\n";
 			}
+			if(renderable.material.has(PBRFloatAttribute.TransmissionFactor)){
+				prefix += "#define transmissionFlag\n";
+			}
+			if(renderable.material.has(PBRTextureAttribute.TransmissionTexture)){
+				prefix += "#define transmissionTextureFlag\n";
+			}
+			if(renderable.material.has(PBRVolumeAttribute.Type)){
+				prefix += "#define volumeFlag\n";
+			}
+			if(renderable.material.has(PBRTextureAttribute.ThicknessTexture)){
+				prefix += "#define thicknessTextureFlag\n";
+			}
+			if(renderable.material.has(PBRFloatAttribute.IOR)){
+				prefix += "#define iorFlag\n";
+			}
+			
+			// Material specular
+			boolean hasSpecular = false;
+			if(renderable.material.has(PBRFloatAttribute.SpecularFactor)){
+				prefix += "#define specularFactorFlag\n";
+				hasSpecular = true;
+			}
+			if(renderable.material.has(PBRHDRColorAttribute.Specular)){
+				hasSpecular = true;
+				prefix += "#define specularColorFlag\n";
+			}
+			if(renderable.material.has(PBRTextureAttribute.SpecularFactorTexture)){
+				prefix += "#define specularFactorTextureFlag\n";
+				hasSpecular = true;
+			}
+			if(renderable.material.has(PBRTextureAttribute.SpecularColorTexture)){
+				prefix += "#define specularColorTextureFlag\n";
+				hasSpecular = true;
+			}
+			if(hasSpecular){
+				prefix += "#define specularFlag\n";
+			}
+			
+			// Material Iridescence
+			if(renderable.material.has(PBRIridescenceAttribute.Type)){
+				prefix += "#define iridescenceFlag\n";
+			}
+			if(renderable.material.has(PBRTextureAttribute.IridescenceTexture)){
+				prefix += "#define iridescenceTextureFlag\n";
+			}
+			if(renderable.material.has(PBRTextureAttribute.IridescenceThicknessTexture)){
+				prefix += "#define iridescenceThicknessTextureFlag\n";
+			}
+			if(renderable.environment.has(ClippingPlaneAttribute.Type)){
+				prefix += "#define clippingPlaneFlag\n";
+			}
+			CascadeShadowMapAttribute csm = renderable.environment.get(CascadeShadowMapAttribute.class, CascadeShadowMapAttribute.Type);
+			if(csm != null){
+				prefix += "#define numCSM " + csm.cascadeShadowMap.lights.size + "\n";
+			}
 			
 			// IBL options
 			PBRCubemapAttribute specualarCubemapAttribute = null;
+			MirrorAttribute specularMirrorAttribute = null;
 			if(renderable.environment != null){
+				if(renderable.environment.has(PBRTextureAttribute.TransmissionSourceTexture)){
+					prefix += "#define transmissionSourceFlag\n";
+				}
 				if(renderable.environment.has(PBRCubemapAttribute.SpecularEnv)){
 					prefix += "#define diffuseSpecularEnvSeparateFlag\n";
 					specualarCubemapAttribute = renderable.environment.get(PBRCubemapAttribute.class, PBRCubemapAttribute.SpecularEnv);
@@ -203,7 +283,13 @@ public class PBRShaderProvider extends DefaultShaderProvider
 				}else if(renderable.environment.has(PBRCubemapAttribute.EnvironmentMap)){
 					specualarCubemapAttribute = renderable.environment.get(PBRCubemapAttribute.class, PBRCubemapAttribute.EnvironmentMap);
 				}
-				if(specualarCubemapAttribute != null){
+				
+				if(renderable.environment.has(MirrorSourceAttribute.Type) && renderable.material.has(MirrorAttribute.Specular)){
+					specularMirrorAttribute = renderable.environment.get(MirrorAttribute.class, MirrorAttribute.Specular);
+					prefix += "#define mirrorSpecularFlag\n";
+				}
+				
+				if(specualarCubemapAttribute != null || specularMirrorAttribute != null){
 					prefix += "#define USE_IBL\n";
 					
 					boolean textureLodSupported;
@@ -216,9 +302,11 @@ public class PBRShaderProvider extends DefaultShaderProvider
 						textureLodSupported = false;
 					}
 					
-					TextureFilter textureFilter = specualarCubemapAttribute.textureDescription.minFilter != null ? specualarCubemapAttribute.textureDescription.minFilter : specualarCubemapAttribute.textureDescription.texture.getMinFilter();
-					if(textureLodSupported && textureFilter.equals(TextureFilter.MipMap)){
-						prefix += "#define USE_TEX_LOD\n";
+					if(specualarCubemapAttribute != null){
+						TextureFilter textureFilter = specualarCubemapAttribute.textureDescription.minFilter != null ? specualarCubemapAttribute.textureDescription.minFilter : specualarCubemapAttribute.textureDescription.texture.getMinFilter();
+						if(textureLodSupported && textureFilter.equals(TextureFilter.MipMap)){
+							prefix += "#define USE_TEX_LOD\n";
+						}
 					}
 					
 					if(renderable.environment.has(PBRTextureAttribute.BRDFLUTTexture)){
@@ -277,6 +365,48 @@ public class PBRShaderProvider extends DefaultShaderProvider
 			TextureAttribute attribute = renderable.material.get(TextureAttribute.class, PBRTextureAttribute.OcclusionTexture);
 			if(attribute != null){
 				prefix += "#define v_occlusionUV v_texCoord" + attribute.uvIndex + "\n";
+				maxUVIndex = Math.max(maxUVIndex, attribute.uvIndex);
+			}
+		}
+		{
+			TextureAttribute attribute = renderable.material.get(TextureAttribute.class, PBRTextureAttribute.TransmissionTexture);
+			if(attribute != null){
+				prefix += "#define v_transmissionUV v_texCoord" + attribute.uvIndex + "\n";
+				maxUVIndex = Math.max(maxUVIndex, attribute.uvIndex);
+			}
+		}
+		{
+			TextureAttribute attribute = renderable.material.get(TextureAttribute.class, PBRTextureAttribute.ThicknessTexture);
+			if(attribute != null){
+				prefix += "#define v_thicknessUV v_texCoord" + attribute.uvIndex + "\n";
+				maxUVIndex = Math.max(maxUVIndex, attribute.uvIndex);
+			}
+		}
+		{
+			TextureAttribute attribute = renderable.material.get(TextureAttribute.class, PBRTextureAttribute.SpecularFactorTexture);
+			if(attribute != null){
+				prefix += "#define v_specularFactorUV v_texCoord" + attribute.uvIndex + "\n";
+				maxUVIndex = Math.max(maxUVIndex, attribute.uvIndex);
+			}
+		}
+		{
+			TextureAttribute attribute = renderable.material.get(TextureAttribute.class, PBRTextureAttribute.Specular);
+			if(attribute != null){
+				prefix += "#define v_specularColorUV v_texCoord" + attribute.uvIndex + "\n";
+				maxUVIndex = Math.max(maxUVIndex, attribute.uvIndex);
+			}
+		}
+		{
+			TextureAttribute attribute = renderable.material.get(TextureAttribute.class, PBRTextureAttribute.IridescenceTexture);
+			if(attribute != null){
+				prefix += "#define v_iridescenceUV v_texCoord" + attribute.uvIndex + "\n";
+				maxUVIndex = Math.max(maxUVIndex, attribute.uvIndex);
+			}
+		}
+		{
+			TextureAttribute attribute = renderable.material.get(TextureAttribute.class, PBRTextureAttribute.IridescenceThicknessTexture);
+			if(attribute != null){
+				prefix += "#define v_iridescenceThicknessUV v_texCoord" + attribute.uvIndex + "\n";
 				maxUVIndex = Math.max(maxUVIndex, attribute.uvIndex);
 			}
 		}
